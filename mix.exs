@@ -1,8 +1,8 @@
 defmodule ArangodbEcto.Mixfile do
   use Mix.Project
 
-  @version "0.1.0"
-  @url "https://github.com/lean5/arangodb_ecto"
+  @version "0.3.0"
+  @url "https://github.com/ArangoDB-Community/arangodb_ecto"
 
   def project do
     [
@@ -25,10 +25,10 @@ defmodule ArangodbEcto.Mixfile do
 
   defp deps do
     [
-      {:ecto, "~> 2.2"},
-      {:arangoex, github: "mpoeter/arangoex"},
+      {:ecto_sql, "~> 3.0"},
+      {:arango, github: "ijcd/arangoex"},
       {:dialyxir, "~> 0.5", only: :dev, runtime: false},
-      {:ex_doc, "~> 0.16", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.19", only: :dev, runtime: false}
     ]
   end
 
@@ -40,7 +40,7 @@ defmodule ArangodbEcto.Mixfile do
 
   defp package do
     [
-      maintainers: ["Manuel Pöter"],
+      maintainers: ["Manuel Pöter", "Marcel van Pinxteren"],
       licenses: ["MIT"],
       links: %{"GitHub" => @url},
       files: ["lib", "mix.exs", "README.md"]

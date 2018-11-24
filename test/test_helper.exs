@@ -3,7 +3,7 @@ ExUnit.start()
 Application.put_env(:ecto, :primary_key_type, :binary_id)
 Application.put_env(:ecto, :async_integration_tests, false)
 
-Code.require_file("../deps/ecto/integration_test/support/repo.exs", __DIR__)
+Code.require_file("../deps/ecto_sql/integration_test/support/repo.exs", __DIR__)
 
 Code.require_file("./integration/support/schemas.exs", __DIR__)
 Code.require_file("./integration/support/migration.exs", __DIR__)
@@ -11,19 +11,21 @@ Code.require_file("./integration/support/migration.exs", __DIR__)
 alias Ecto.Integration.TestRepo
 
 Application.put_env(
-  :ecto,
+  :ecto_sql,
   TestRepo,
   adapter: ArangoDB.Ecto,
   database: "test"
 )
 
 defmodule Ecto.Integration.TestRepo do
-  use Ecto.Integration.Repo, otp_app: :ecto
+  use Ecto.Integration.Repo,
+    otp_app: :ecto_sql,
+    adapter: ArangoDB.Ecto
 
   def init(_type, opts) do
     opts =
       opts
-      |> Keyword.put(:host, System.get_env("ARANGO_SRV") || opts[:host] || "localhost")
+      |> Keyword.put(:hostname, System.get_env("ARANGO_SRV") || opts[:hostname] || "localhost")
       |> Keyword.put(:username, System.get_env("ARANGO_USR") || opts[:username])
       |> Keyword.put(:password, System.get_env("ARANGO_PWD") || opts[:password])
 
@@ -34,19 +36,21 @@ end
 alias Ecto.Integration.PoolRepo
 
 Application.put_env(
-  :ecto,
+  :ecto_sql,
   PoolRepo,
   adapter: ArangoDB.Ecto,
-  database_name: "pool"
+  database: "pool"
 )
 
 defmodule Ecto.Integration.PoolRepo do
-  use Ecto.Integration.Repo, otp_app: :ecto
+  use Ecto.Integration.Repo,
+    otp_app: :ecto_sql,
+    adapter: ArangoDB.Ecto
 
   def init(_type, opts) do
     opts =
       opts
-      |> Keyword.put(:host, System.get_env("ARANGO_SRV") || opts[:host] || "localhost")
+      |> Keyword.put(:hostname, System.get_env("ARANGO_SRV") || opts[:hostname] || "localhost")
       |> Keyword.put(:username, System.get_env("ARANGO_USR") || opts[:username])
       |> Keyword.put(:password, System.get_env("ARANGO_PWD") || opts[:password])
 

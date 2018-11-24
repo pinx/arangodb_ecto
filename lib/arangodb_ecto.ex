@@ -1,74 +1,193 @@
 defmodule ArangoDB.Ecto do
-  @moduledoc """
-  Ecto 2.x adapter for ArangoDB.
+  @moduledoc false
 
-  At the moment the `from`, `where`, `order_by`, `limit`
-  `offset` and `select` clauses are supported.
-  """
+  require Logger
 
-  alias ArangoDB.Ecto.Utils
+  # Inherit all behaviour from Ecto.Adapters.SQL
+  use Ecto.Adapters.SQL, :arango_db
 
-  def truncate(repo, coll) do
-    result =
-      Utils.get_endpoint(repo)
-      |> Arangoex.Collection.truncate(%Arangoex.Collection{name: coll})
+  # And provide a custom storage implementation
+  @behaviour Ecto.Adapter.Storage
+  @behaviour Ecto.Adapter.Structure
 
-    case result do
+  ## Storage API
+
+  @impl true
+  def storage_up(opts) do
+    database =
+      Keyword.fetch!(opts, :database) || raise ":database is nil in repository configuration"
+
+    response = Arango.Database.create(name: database) |> Arango.request()
+
+    case response do
       {:ok, _} -> :ok
-      {:error, _} -> result
+      {:error, %{"code" => 409}} -> {:error, :already_up}
+      {:error, _} -> response
     end
   end
 
-  def query(repo, aql, vars \\ []) do
-    res = ArangoDB.Ecto.Adapter.exec_query!(repo, aql, vars)
-    {:ok, res}
-  rescue
-    e in RuntimeError -> {:error, e.message}
+  @impl true
+  def storage_down(opts) do
+    database =
+      Keyword.fetch!(opts, :database) || raise ":database is nil in repository configuration"
+
+    response = Arango.Database.drop(database) |> Arango.request()
+
+    case response do
+      {:ok, _} -> :ok
+      {:error, %{"code" => 404}} -> {:error, :already_down}
+      {:error, _} -> response
+    end
   end
 
-  def query!(repo, aql, vars \\ []) do
-    ArangoDB.Ecto.Adapter.exec_query!(repo, aql, vars)
+  @impl true
+  def supports_ddl_transaction? do
+    false
   end
 
-  @behaviour Ecto.Adapter
+  @impl true
+  def structure_dump(default, config) do
+    table = config[:migration_source] || "schema_migrations"
 
-  # Delegates for Adapter behaviour
-
-  defmacro __before_compile__(_env) do
+    with {:ok, versions} <- select_versions(table, config),
+         {:ok, path} <- pg_dump(default, config),
+         do: append_versions(table, versions, path)
   end
 
-  defdelegate autogenerate(field_type), to: ArangoDB.Ecto.Adapter
-  defdelegate child_spec(repo, options), to: ArangoDB.Ecto.Adapter
-  defdelegate delete(repo, schema_meta, filters, options), to: ArangoDB.Ecto.Adapter
-  defdelegate dumpers(primitive_type, ecto_type), to: ArangoDB.Ecto.Adapter
-  defdelegate ensure_all_started(repo, type), to: ArangoDB.Ecto.Adapter
+  defp select_versions(table, config) do
+    case run_query(~s[SELECT version FROM public."#{table}" ORDER BY version], config) do
+      {:ok, %{rows: rows}} ->
+        {:ok, Enum.map(rows, &hd/1)}
 
-  defdelegate execute(repo, query_meta, query, params, process, options),
-    to: ArangoDB.Ecto.Adapter
+      {
+        :error,
+        %{
+          postgres: %{
+            code: :undefined_table
+          }
+        }
+      } ->
+        {:ok, []}
 
-  defdelegate insert(repo, schema_meta, fields, on_conflict, returning, options),
-    to: ArangoDB.Ecto.Adapter
+      {:error, _} = error ->
+        error
+    end
+  end
 
-  defdelegate insert_all(repo, schema_meta, header, list, on_conflict, returning, options),
-    to: ArangoDB.Ecto.Adapter
+  defp pg_dump(default, config) do
+    path = config[:dump_path] || Path.join(default, "structure.sql")
+    File.mkdir_p!(Path.dirname(path))
 
-  defdelegate loaders(primitive_type, ecto_type), to: ArangoDB.Ecto.Adapter
-  defdelegate prepare(atom, query), to: ArangoDB.Ecto.Adapter
+    case run_with_cmd(
+           "arangodump",
+           config,
+           [
+             "--output-directory #{path}",
+             "--dump-data false",
+             "--server.database #{config[:database]}"
+           ]
+         ) do
+      {_output, 0} ->
+        {:ok, path}
 
-  defdelegate update(repo, schema_meta, fields, filters, returning, options),
-    to: ArangoDB.Ecto.Adapter
+      {output, _} ->
+        {:error, output}
+    end
+  end
 
-  @behaviour Ecto.Adapter.Migration
+  defp append_versions(_table, [], path) do
+    {:ok, path}
+  end
 
-  # Delegates for Migration behaviour
+  defp append_versions(table, versions, path) do
+    sql = "FOR v IN #{versions} INSERT {'version': v} IN #{table}"
 
-  defdelegate supports_ddl_transaction?, to: ArangoDB.Ecto.Migration
-  defdelegate execute_ddl(repo, ddl, opts), to: ArangoDB.Ecto.Migration
+    File.open!(
+      path,
+      [:append],
+      fn file ->
+        IO.write(file, sql)
+      end
+    )
 
-  @behaviour Ecto.Adapter.Storage
+    {:ok, path}
+  end
 
-  # Delegates for Storage behaviour
+  @impl true
+  def structure_load(default, config) do
+    path = config[:dump_path] || Path.join(default, "structure.sql")
 
-  defdelegate storage_up(options), to: ArangoDB.Ecto.Storage
-  defdelegate storage_down(options), to: ArangoDB.Ecto.Storage
+    args = [
+      "--input-directory #{path}",
+      "--server-database #{config[:database]}"
+    ]
+
+    case run_with_cmd("arangorestore", config, args) do
+      {_output, 0} -> {:ok, path}
+      {output, _} -> {:error, output}
+    end
+  end
+
+  ## Helpers
+
+  defp run_query(sql, opts) do
+    Logger.debug(sql)
+    # {:ok, _} = Application.ensure_all_started(:postgrex)
+
+    # opts =
+    #   opts
+    #   |> Keyword.drop([:name, :log, :pool, :pool_size])
+    #   |> Keyword.put(:backoff_type, :stop)
+    #   |> Keyword.put(:max_restarts, 0)
+
+    # {:ok, pid} = Task.Supervisor.start_link
+
+    # task = Task.Supervisor.async_nolink(pid, fn ->
+    #   {:ok, conn} = Postgrex.start_link(opts)
+
+    #   value = Postgrex.query(conn, sql, [], opts)
+    #   GenServer.stop(conn)
+    #   value
+    # end)
+
+    # timeout = Keyword.get(opts, :timeout, 15_000)
+
+    # case Task.yield(task, timeout) || Task.shutdown(task) do
+    #   {:ok, {:ok, result}} ->
+    #     {:ok, result}
+    #   {:ok, {:error, error}} ->
+    #     {:error, error}
+    #   {:exit, {%{__struct__: struct} = error, _}}
+    #       when struct in [Postgrex.Error, DBConnection.Error] ->
+    #     {:error, error}
+    #   {:exit, reason}  ->
+    #     {:error, RuntimeError.exception(Exception.format_exit(reason))}
+    #   nil ->
+    #     {:error, RuntimeError.exception("command timed out")}
+    # end
+  end
+
+  defp run_with_cmd(cmd, opts, opt_args) do
+    unless System.find_executable(cmd) do
+      raise "could not find executable `#{cmd}` in path, " <>
+              "please guarantee it is available before running ecto commands"
+    end
+
+    env = [{"PGCONNECT_TIMEOUT", "10"}]
+
+    env =
+      if password = opts[:password] do
+        [{"PGPASSWORD", password} | env]
+      else
+        env
+      end
+
+    args = []
+    args = if username = opts[:username], do: ["--server.username", username | args], else: args
+    port = if port = opts[:port], do: ":" <> to_string(port), else: ""
+    host = opts[:hostname] <> port || System.get_env("PGHOST") || "localhost"
+    args = ["--server.endpoint", host | args]
+    args = args ++ opt_args
+    System.cmd(cmd, args, env: env, stderr_to_stdout: true)
+  end
 end
