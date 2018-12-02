@@ -10,24 +10,38 @@ defmodule ArangoDB.Ecto.Connection do
   @impl true
   def child_spec(opts) do
     IO.inspect(opts, label: "Startup options")
-    {:ok, self()}
+    DBConnection.child_spec(ArangoDB.Ecto.Connection, opts)
+  end
+
+  def connect(opts) do
+    Logger.debug("connect #{inspect(opts)}")
+    {:ok, opts}
+  end
+
+  def checkout(opts) do
+    Logger.debug("checkout #{inspect(opts)}")
+    {:ok, opts}
   end
 
   ## Query
 
   @impl true
   def prepare_execute(conn, name, sql, params, opts) do
-    Logger.debug(sql, label: "prepare_execute")
+    Logger.debug("prepare_execute #{inspect(sql)}")
   end
 
   @impl true
   def query(conn, sql, params, opts) do
-    Logger.debug(sql, label: "query")
+    Logger.debug("query #{inspect(sql)}")
+    Logger.debug("query #{inspect(params)}")
+    Logger.debug("query #{inspect(opts)}")
+    Arango.request(sql)
   end
 
   @impl true
-  def execute(conn, %{ref: ref} = query, params, opts) do
-    Logger.debug(query, label: "execute")
+  # def execute(conn, %{ref: ref} = query, params, opts) do
+  def execute(conn, query, params, opts) do
+    Logger.debug("execute #{inspect(query)}")
     # case Postgrex.execute(conn, query, params, opts) do
     #   {:ok, %{ref: ^ref}, result} ->
     #     {:ok, result}
@@ -48,7 +62,7 @@ defmodule ArangoDB.Ecto.Connection do
 
   @impl true
   def stream(conn, sql, params, opts) do
-    Logger.debug(sql, label: "stream")
+    Logger.debug("stream #{inspect(sql)}")
     # Postgrex.stream(conn, sql, params, opts)
   end
 

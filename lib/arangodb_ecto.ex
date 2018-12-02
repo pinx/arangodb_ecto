@@ -131,7 +131,7 @@ defmodule ArangoDB.Ecto do
   ## Helpers
 
   defp run_query(sql, opts) do
-    Logger.debug(sql)
+    Logger.debug("run_query #{inspect(sql)}")
     # {:ok, _} = Application.ensure_all_started(:postgrex)
 
     # opts =
@@ -165,6 +165,7 @@ defmodule ArangoDB.Ecto do
     #   nil ->
     #     {:error, RuntimeError.exception("command timed out")}
     # end
+    {:ok, %{}}
   end
 
   defp run_with_cmd(cmd, opts, opt_args) do
