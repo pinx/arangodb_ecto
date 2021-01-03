@@ -323,6 +323,14 @@ defmodule ArangoDB.Ecto.Query do
     [expr(arg, sources, query) | " == NULL"]
   end
 
+  defp expr({:datetime_add, _, [datetime, count, interval]}, sources, query) do
+    ["DATE_ADD(", expr(datetime, sources, query), ", ", expr(count, sources, query), ", \"", interval | "\")"]
+  end
+
+  defp expr({:date_add, arg, [date, count, interval]}, sources, query) do
+    ["LEFT(", expr({:datetime_add, arg, [date, count, interval]}, sources, query) | ", 10)"]
+  end
+
   defp expr({:in, _, [_left, []]}, _sources, _query) do
     "FALSE"
   end
@@ -390,8 +398,6 @@ defmodule ArangoDB.Ecto.Query do
     if String.contains?(name, "`"), do: error!(nil, "bad field name #{inspect(name)}")
     [?`, name, ?`]
   end
-
-  defp quote_collection(name) when is_atom(name), do: quote_collection(Atom.to_string(name))
 
   defp quote_collection(name) do
     if String.contains?(name, "`"), do: error!(nil, "bad table name #{inspect(name)}")
